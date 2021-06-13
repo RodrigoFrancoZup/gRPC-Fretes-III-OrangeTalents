@@ -1,0 +1,79 @@
+Healthcheck sobre HTTP:
+
+Vamos agora habilitar o monitoramento de saúde de uma API gRPC. Com ela vamos poder saber se está tudo certo com a aplicação ou se a mesma está travando ou se caiu. Esse monitoramento ainda auxilia o balanceador de carga e o Kubernet a tomarem ações como tirar a API do ar, reiniciar, ou criar outra instância...
+
+Siga o passo a passo para habilitar esse recurso:
+
+1) No arquivo build.gradle, dentro da seção dependencies adicionar:
+	implementation("io.micronaut:micronaut-management")
+
+Somente com isso o endpoint /health já estará habilitado
+
+2) Com o passo anterior já está habilitado o endpoint /health, mas para termos um controle de liga/desliga vamos adicionar o seguinte trecho no arquivo application.yml:
+
+grpc:
+  server:
+    health:
+      enabled: true
+
+Caso queira desligar, basta trocar true por false;
+
+3) Só que agora temos um problema, os endpoints liberados pelo healthcheck é do tipo http, mas o nosso servidor é do tipo gRPC. Logo vamos ter que subir junto com esse servidor um servidor http. Para isso ir no arquivo build.gradle, na seção micronaut{} e adicionar a linha:
+	runtime "netty"
+Agora quando rodarmos a aplicação teremos um servidor http (porta 8080) e um gRPC (porta 50051);
+
+4)Podemos criar um endpoint personalizado, mas só de fazer isso já ganhamos vários, veja o site para conhcer os endpoints liberados:
+https://docs.micronaut.io/latest/guide/index.html#providedEndpoints
+
+5) Agora sim, fiz uma requisição get para localhost:8080/health e vi apenas o status ok (status global da aplicação), como obter mais detalhes como memória, pool de conexão, disco, entre outros. Para isso ir no arquivo application.yml e adicionar:
+
+endpoints:
+  health:
+    enabled: true
+    sensitive: false
+    details-visible: ANONYMOUS
+
+enabled = ativa os endpoints ou desativa;
+sensitive = determina se endpoints para ser acessado exigirá user logado
+details-visible = vai determinar quais detalhes serão exibidos de acordo com o grupo que vamos escolher (cada grupo já tem um conjunto de detalhes definidos)
+Dessa maneira ao acessar: localhost:8080/health veremos mais detalhes!
+
+6) Conhecendo outros endpoints:
+localhost:8080/health/readiness = é um indicador útil para o Kubernet (integração com Kubernet), pois esse indica que a aplicação já está apta a receber requisições;
+localhost:8080/health/liveness = é um indicador útil para o Kubernet (integração com Kubernet), pois esse indica ao Kubernet se a aplicação precisa ser reiniciada (reiniciar o Container)
+
+7)Seria legal vermos o serviço gRPC desligado (Down) e assim verificar seu status de saúde. Para fazer isso vamos criar um endpoint http dentro de uma classe controller e nele vamos desligar (derrubar) o servidor de gRPC. Vai ficar assim:
+
+@Controller
+class GrpcServerController (@Inject val grpcServer: GrpcEmbeddedServer) {
+
+    @Get("/grpc-server/stop")
+    fun stop() : HttpResponse<String> {
+        grpcServer.stop()
+        return HttpResponse.ok("is running? ${grpcServer.isRunning}")
+    }
+}
+
+Para pausar o servidor, basta fazer requisição get para: localhost:8080/grpc-server/stop
+
+
+8) Como mudar a porta que roda os endpoint de saúde? Basta ir no arquivo application.yml e dentro de endpoints (já criamos esse para configurar os endpoints de saúde) acrescentar:
+all:
+  port: 8085
+  sensitive: true
+
+Ficou assim:
+endpoints:
+  all:
+    port: 8085
+    sensitive: true
+  health:
+    enabled: true
+    sensitive: false
+    details-visible: ANONYMOUS
+
+Dessa forma o servidor rodará na porta 8085, logo teremos que fazer a requisição: localhost:8085/health.
+Outro detalhe que dentro de all colocamos sensitive: true, ou seja, toda URL exigirá usuário logado, só que posterior a isso criamos um health com sensitive false, logo apenas as URL de saúde não exigirão usuário logado.
+
+
+
